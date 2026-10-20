@@ -13,6 +13,7 @@ const int LED_PIN_R = 4;
 const int LED_PIN_G = 6;
 
 QueueHandle_t xQueueButId;
+QueueHandle_t xQueueButId_g;
 
 void led_1_task(void *p) {
     gpio_init(LED_PIN_R);
@@ -58,14 +59,74 @@ void btn_1_task(void *p) {
 }
 
 
+// LED G: le o delay da fila verde.
+//
+// A diferenca para o exe2 esta aqui: o semaforo so dizia "aconteceu alguma
+// coisa"; a fila CARREGA UM VALOR. Por isso a led_2_task consegue descobrir com
+// que frequencia piscar sem nenhuma variavel global -- o numero vem junto com o
+// aviso.
+void led_2_task(void *p) {
+    gpio_init(LED_PIN_G);
+    gpio_set_dir(LED_PIN_G, GPIO_OUT);
+
+    // Guarda o ultimo delay recebido. E local: enquanto a fila nao trouxer um
+    // valor novo, este continua valendo.
+    int delay = 0;
+    while (true) {
+        // Timeout 0 = "olha a fila e segue a vida". Nao bloqueia, porque esta
+        // task tambem precisa continuar piscando enquanto espera.
+        if (xQueueReceive(xQueueButId_g, &delay, 0)) {
+            printf("%d\n", delay);
+        }
+
+        if (delay > 0) {
+            gpio_put(LED_PIN_G, 1);
+            vTaskDelay(pdMS_TO_TICKS(delay));
+            gpio_put(LED_PIN_G, 0);
+            vTaskDelay(pdMS_TO_TICKS(delay));
+        }
+    }
+}
+
+// BTN G: a cada aperto completo soma 100 ms e manda o novo valor pela fila.
+void btn_2_task(void *p) {
+    gpio_init(BTN_PIN_G);
+    gpio_set_dir(BTN_PIN_G, GPIO_IN);
+    gpio_pull_up(BTN_PIN_G);
+
+    int delay = 0;
+    while (true) {
+        if (!gpio_get(BTN_PIN_G)) {
+
+            while (!gpio_get(BTN_PIN_G)) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+            }
+
+            if (delay < 1000) {
+                delay += 100;
+            } else {
+                delay = 100;
+            }
+            printf("delay btn %d \n", delay);
+            xQueueSend(xQueueButId_g, &delay, 0);
+        }
+    }
+}
+
+
 int main() {
     stdio_init_all();
     printf("Start RTOS \n");
 
+    // 32 posicoes de um int cada. O tamanho do item e fixo e definido aqui: a
+    // fila copia o valor, nao guarda ponteiro para a variavel de quem enviou.
     xQueueButId = xQueueCreate(32, sizeof(int));
+    xQueueButId_g = xQueueCreate(32, sizeof(int));
 
     xTaskCreate(led_1_task, "LED_Task 1", 256, NULL, 1, NULL);
     xTaskCreate(btn_1_task, "BTN_Task 1", 256, NULL, 1, NULL);
+    xTaskCreate(led_2_task, "LED_Task 2", 256, NULL, 1, NULL);
+    xTaskCreate(btn_2_task, "BTN_Task 2", 256, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
